@@ -1,0 +1,45 @@
+# Build outputs
+/target/
+/out/
+/build/
+frontend/dist/
+frontend/node_modules/
+
+# Maven
+!.mvn/wrapper/maven-wrapper.jar
+
+# Runtime/logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Test / coverage artifacts
+coverage/
+frontend/coverage/
+
+# Local tooling metadata not needed in GitHub repo
+.cursor/
+
+# Keep only README markdown in repository
+*.md
+!README.md
