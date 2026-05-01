@@ -119,6 +119,10 @@ public class TaskService {
                 && project.getMembers().stream().anyMatch(m -> m.getId().equals(currentUser.getId()))) {
             return;
         }
+        if (project.getId() != null
+                && taskRepository.existsByProject_IdAndAssignedTo_Id(project.getId(), currentUser.getId())) {
+            return;
+        }
         throw new ForbiddenException("You do not have access to this project");
     }
 }
