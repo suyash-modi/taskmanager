@@ -2,6 +2,7 @@ package com.taskmanager.controller;
 
 import com.taskmanager.dto.ProjectCreateRequest;
 import com.taskmanager.dto.ProjectResponse;
+import com.taskmanager.entity.Role;
 import com.taskmanager.entity.User;
 import com.taskmanager.exception.ForbiddenException;
 import com.taskmanager.service.ProjectService;
@@ -30,28 +31,25 @@ public class ProjectController {
             @Valid @RequestBody ProjectCreateRequest request,
             HttpServletRequest httpRequest) {
 
-        String role = (String) httpRequest.getAttribute("role");
-        if (!"ADMIN".equals(role)) {
-            throw new ForbiddenException("Only ADMIN can create projects");
-        }
         String email = (String) httpRequest.getAttribute("email");
         User creator = userService.getByEmail(email);
+        if (!Role.ADMIN.equals(creator.getRole())) {
+            throw new ForbiddenException("Only ADMIN can create projects");
+        }
         return projectService.create(request, creator);
     }
 
     @GetMapping
     public List<ProjectResponse> listProjects(HttpServletRequest httpRequest) {
         String email = (String) httpRequest.getAttribute("email");
-        String role = (String) httpRequest.getAttribute("role");
         User user = userService.getByEmail(email);
-        return projectService.listFor(user, role);
+        return projectService.listFor(user);
     }
 
     @GetMapping("/{id}")
     public ProjectResponse getProject(@PathVariable Long id, HttpServletRequest httpRequest) {
         String email = (String) httpRequest.getAttribute("email");
-        String role = (String) httpRequest.getAttribute("role");
         User user = userService.getByEmail(email);
-        return projectService.getById(id, user, role);
+        return projectService.getById(id, user);
     }
 }

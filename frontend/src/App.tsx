@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   clearAuth,
@@ -13,6 +13,16 @@ import {
   type TaskResponse,
   type UserResponse,
 } from "./api";
+import { UNAUTHORIZED_EVENT } from "./authEvents";
+
+function parseRole(value: unknown): Role {
+  if (value === "ADMIN" || value === "MEMBER") return value;
+  if (typeof value === "string") {
+    const u = value.trim().toUpperCase();
+    if (u === "ADMIN" || u === "MEMBER") return u as Role;
+  }
+  throw new Error("Login response missing or invalid role");
+}
 
 type SignupForm = {
   name: string;
@@ -23,10 +33,12 @@ type SignupForm = {
 
 type LookupMap = Record<number, UserResponse | null>;
 
+type Feedback = { kind: "success" | "error"; message: string };
+
 export default function App() {
   const [auth, setAuthState] = useState<LoginResponse | null>(() => getAuth());
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
 
   const [signup, setSignup] = useState<SignupForm>({
@@ -51,9 +63,12 @@ export default function App() {
   const [assigneeId, setAssigneeId] = useState("");
 
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
   const [myTasks, setMyTasks] = useState<TaskResponse[]>([]);
   const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
   const [userLookup, setUserLookup] = useState<LookupMap>({});
+  const userLookupRef = useRef<LookupMap>({});
+  userLookupRef.current = userLookup;
   const [currentUser, setCurrentUser] = useState<UserResponse | null>(null);
 
   const isAdmin = useMemo(() => auth?.role === "ADMIN", [auth]);
@@ -74,10 +89,12 @@ export default function App() {
     const raw = await api<unknown>("/projects", { method: "GET" });
     const list = Array.isArray(raw) ? (raw as ProjectResponse[]) : [];
     setProjects(list);
-    if (list.length && selectedProjectId === "") {
-      setSelectedProjectId(list[0]?.id ?? "");
-    }
-  }, [selectedProjectId]);
+    setSelectedProjectId((prev) => {
+      if (list.length === 0) return "";
+      if (prev === "") return list[0]?.id ?? "";
+      return list.some((p) => p.id === prev) ? prev : (list[0]?.id ?? "");
+    });
+  }, []);
 
   const refreshDashboard = useCallback(async () => {
     if (!getAuth()) return;
@@ -100,47 +117,75 @@ export default function App() {
     setMyTasks(Array.isArray(raw) ? (raw as TaskResponse[]) : []);
   }, []);
 
-  const refreshTasksForProject = useCallback(
-    async (projectId: number) => {
-      if (!getAuth()) return;
-      const raw = await api<unknown>(`/tasks/project/${projectId}`, { method: "GET" });
-      setTasks(Array.isArray(raw) ? (raw as TaskResponse[]) : []);
-    },
-    [],
-  );
+  const refreshTasksForProject = useCallback(async (projectId: number, signal?: AbortSignal) => {
+    if (!getAuth()) return;
+    const raw = await api<unknown>(`/tasks/project/${projectId}`, { method: "GET", signal });
+    setTasks(Array.isArray(raw) ? (raw as TaskResponse[]) : []);
+  }, []);
+
+  useEffect(() => {
+    const onSessionExpired = () => {
+      setAuthState(null);
+      setCurrentUser(null);
+      setSelectedProjectId("");
+      setProjects([]);
+      setTasks([]);
+      setMyTasks([]);
+      setDashboard(null);
+      setUserLookup({});
+      setLoadingMessage(null);
+      setFeedback({ kind: "error", message: "Session expired. Please log in again." });
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, onSessionExpired);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onSessionExpired);
+  }, []);
 
   useEffect(() => {
     if (!auth) return;
     void (async () => {
       try {
-        setError(null);
+        setFeedback(null);
         setLoadingMessage("Loading workspace...");
         const me = await fetchCurrentUser();
         setCurrentUser(me);
+        if (!me) {
+          setFeedback({
+            kind: "error",
+            message: "Could not load your profile. If this persists, log out and sign in again.",
+          });
+        }
         await refreshProjects();
         await refreshDashboard();
         await refreshMyTasks();
         setLoadingMessage(null);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setFeedback({ kind: "error", message: e instanceof Error ? e.message : String(e) });
         setLoadingMessage(null);
       }
     })();
   }, [auth, refreshProjects, refreshDashboard, refreshMyTasks]);
 
   useEffect(() => {
-    if (typeof selectedProjectId === "number") {
-      void (async () => {
-        try {
-          setError(null);
-          await refreshTasksForProject(selectedProjectId);
-        } catch (e) {
-          setError(e instanceof Error ? e.message : String(e));
-        }
-      })();
-    } else {
+    if (typeof selectedProjectId !== "number") {
       setTasks([]);
+      setTasksLoading(false);
+      return;
     }
+    const ac = new AbortController();
+    setTasksLoading(true);
+    void (async () => {
+      try {
+        setFeedback(null);
+        await refreshTasksForProject(selectedProjectId, ac.signal);
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return;
+        setTasks([]);
+        setFeedback({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+      } finally {
+        if (!ac.signal.aborted) setTasksLoading(false);
+      }
+    })();
+    return () => ac.abort();
   }, [selectedProjectId, refreshTasksForProject]);
 
   useEffect(() => {
@@ -174,38 +219,51 @@ export default function App() {
     const ids = new Set<number>();
     parsedMemberIds.forEach((id) => ids.add(id));
     if (parsedAssigneeId) ids.add(parsedAssigneeId);
+    tasks.forEach((t) => {
+      if (t.assignedToUserId != null) ids.add(t.assignedToUserId);
+    });
+    myTasks.forEach((t) => {
+      if (t.assignedToUserId != null) ids.add(t.assignedToUserId);
+    });
     return Array.from(ids);
-  }, [parsedMemberIds, parsedAssigneeId]);
+  }, [parsedMemberIds, parsedAssigneeId, tasks, myTasks]);
+
+  const knownUserIdsKey = useMemo(
+    () => [...new Set(knownUserIds)].sort((a, b) => a - b).join(","),
+    [knownUserIds],
+  );
 
   useEffect(() => {
     if (!auth || knownUserIds.length === 0) return;
+    const missing = [...new Set(knownUserIds)].filter((id) => userLookupRef.current[id] === undefined);
+    if (missing.length === 0) return;
     let cancelled = false;
     void (async () => {
-      for (const id of knownUserIds) {
-        if (userLookup[id] !== undefined) continue;
+      for (const id of missing) {
+        if (cancelled) return;
         const user = await fetchUserById(id);
         if (cancelled) return;
-        setUserLookup((prev) => ({ ...prev, [id]: user }));
+        setUserLookup((prev) => (prev[id] !== undefined ? prev : { ...prev, [id]: user }));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [auth, knownUserIds, userLookup]);
+  }, [auth, knownUserIdsKey]);
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    setError(null);
+    setFeedback(null);
     try {
       await api<UserResponse>("/auth/signup", {
         method: "POST",
         body: JSON.stringify(signup),
       });
       setSignup({ name: "", email: "", password: "", role: "MEMBER" });
-      setError("Account created successfully. You can login now.");
+      setFeedback({ kind: "success", message: "Account created. You can log in now." });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setFeedback({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
@@ -214,7 +272,7 @@ export default function App() {
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    setError(null);
+    setFeedback(null);
     try {
       const raw = await api<unknown>("/auth/login", {
         method: "POST",
@@ -224,7 +282,7 @@ export default function App() {
         throw new Error("Unexpected login response");
       }
       const res = raw as Partial<LoginResponse>;
-      if (!res.accessToken || !res.email || !res.role) {
+      if (!res.accessToken || !res.email || res.role === undefined || res.role === null) {
         throw new Error("Invalid login payload. Re-check backend /auth/login response.");
       }
       const normalized: LoginResponse = {
@@ -232,13 +290,20 @@ export default function App() {
         tokenType: res.tokenType ?? "Bearer",
         expiresInSeconds: Number(res.expiresInSeconds ?? 3600),
         email: res.email,
-        role: res.role as Role,
+        role: parseRole(res.role),
       };
       setAuth(normalized);
       setAuthState(normalized);
-      setError(null);
+      setSelectedProjectId("");
+      setProjects([]);
+      setTasks([]);
+      setMyTasks([]);
+      setDashboard(null);
+      setUserLookup({});
+      setCurrentUser(null);
+      setFeedback(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setFeedback({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
@@ -248,18 +313,21 @@ export default function App() {
     clearAuth();
     setAuthState(null);
     setCurrentUser(null);
+    setSelectedProjectId("");
     setProjects([]);
     setTasks([]);
     setMyTasks([]);
     setDashboard(null);
+    setUserLookup({});
     setLoadingMessage(null);
+    setFeedback(null);
   }
 
   async function handleCreateProject(e: React.FormEvent) {
     e.preventDefault();
     if (!isAdmin) return;
     setBusy(true);
-    setError(null);
+    setFeedback(null);
     try {
       const ids = memberIds
         .split(",")
@@ -281,8 +349,9 @@ export default function App() {
       setMemberIds("");
       await refreshProjects();
       await refreshDashboard();
+      setFeedback({ kind: "success", message: "Project created." });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setFeedback({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
@@ -292,7 +361,7 @@ export default function App() {
     e.preventDefault();
     if (!isAdmin || typeof selectedProjectId !== "number") return;
     setBusy(true);
-    setError(null);
+    setFeedback(null);
     try {
       const body: Record<string, unknown> = {
         title: taskTitle,
@@ -314,8 +383,9 @@ export default function App() {
       await refreshTasksForProject(selectedProjectId);
       await refreshDashboard();
       await refreshMyTasks();
+      setFeedback({ kind: "success", message: "Task created." });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setFeedback({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
@@ -323,7 +393,7 @@ export default function App() {
 
   async function updateTaskStatus(taskId: number, status: string) {
     setBusy(true);
-    setError(null);
+    setFeedback(null);
     try {
       await api<TaskResponse>(`/tasks/${taskId}/status`, {
         method: "PUT",
@@ -335,7 +405,7 @@ export default function App() {
       await refreshDashboard();
       await refreshMyTasks();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setFeedback({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
@@ -372,8 +442,10 @@ export default function App() {
         {auth && (
           <div className="row">
             <div className="user-pill">
-              {currentUser ? `#${currentUser.id} ${currentUser.name}` : auth.email}{" "}
-              <span className="badge">{auth.role}</span>
+              {currentUser
+                ? `#${currentUser.id} ${currentUser.name}`
+                : `${auth.email} (loading profile…)`}{" "}
+              <span className="badge">{typeof auth.role === "string" ? auth.role : String(auth.role)}</span>
             </div>
             <button type="button" className="secondary" onClick={handleLogout}>
               Log out
@@ -382,7 +454,11 @@ export default function App() {
         )}
       </header>
 
-      {error && <div className="card error">{error}</div>}
+      {feedback && (
+        <div className={`card notice ${feedback.kind === "success" ? "notice-success" : "notice-error"}`}>
+          {feedback.message}
+        </div>
+      )}
       {loadingMessage && <div className="card muted">{loadingMessage}</div>}
 
       {!auth ? (
@@ -590,8 +666,10 @@ export default function App() {
           {typeof selectedProjectId === "number" && (
             <div className="card">
               <h2>Tasks in project #{selectedProjectId}</h2>
-              {tasks.length === 0 ? (
-                <p>No tasks.</p>
+              {tasksLoading ? (
+                <p className="muted">Loading tasks…</p>
+              ) : tasks.length === 0 ? (
+                <p>No tasks in this project (or none assigned to you).</p>
               ) : (
                 <ul className="tasks">
                   {tasks.map((t) => (

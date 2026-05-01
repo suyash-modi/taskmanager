@@ -1,6 +1,7 @@
 package com.taskmanager.controller;
 
 import com.taskmanager.dto.UserResponse;
+import com.taskmanager.exception.UnauthorizedException;
 import com.taskmanager.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -16,15 +17,18 @@ public class UserQueryController {
 
     private final UserService userService;
 
-    @GetMapping("/{id}")
-    public UserResponse getById(@PathVariable Long id) {
-        return userService.getByIdResponse(id);
-    }
-
     @GetMapping("/me")
     public UserResponse getCurrentUser(HttpServletRequest request) {
         String email = (String) request.getAttribute("email");
+        if (email == null || email.isBlank()) {
+            throw new UnauthorizedException("Missing authenticated user");
+        }
         return userService.getByEmailResponse(email);
+    }
+
+    @GetMapping("/{id}")
+    public UserResponse getById(@PathVariable Long id) {
+        return userService.getByIdResponse(id);
     }
 }
 

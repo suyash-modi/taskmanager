@@ -1,4 +1,6 @@
-const BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+import { notifyUnauthorized } from "./authEvents";
+
+const BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
 
 export type Role = "ADMIN" | "MEMBER";
 
@@ -61,6 +63,17 @@ export function clearAuth() {
   localStorage.removeItem(AUTH_KEY);
 }
 
+function normalizeApiPath(path: string): string {
+  if (path.startsWith("http")) {
+    try {
+      return new URL(path).pathname;
+    } catch {
+      return path;
+    }
+  }
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
 export async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   const auth = getAuth();
   const headers: Record<string, string> = {
@@ -69,18 +82,29 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
   if (!headers["Content-Type"] && opts.body) {
     headers["Content-Type"] = "application/json";
   }
-  if (auth?.accessToken) {
+  const pathOnly = normalizeApiPath(path);
+  const isPublicAuth = pathOnly === "/auth/login" || pathOnly === "/auth/signup";
+  if (auth?.accessToken && !isPublicAuth) {
     headers.Authorization = `Bearer ${auth.accessToken}`;
   }
-  const res = await fetch(`${BASE}${path}`, { ...opts, headers });
+  const url = path.startsWith("http") ? path : `${BASE}${pathOnly}`;
+  const res = await fetch(url, { ...opts, headers });
   const text = await res.text();
   if (!res.ok) {
-    try {
-      const parsed = text ? (JSON.parse(text) as { message?: string }) : {};
-      throw new Error(parsed.message || text || res.statusText);
-    } catch {
-      throw new Error(text || res.statusText);
+    if (res.status === 401 && !isPublicAuth && auth?.accessToken) {
+      clearAuth();
+      notifyUnauthorized();
     }
+    let message = text || res.statusText;
+    if (text) {
+      try {
+        const parsed = JSON.parse(text) as { message?: string };
+        if (parsed.message) message = parsed.message;
+      } catch {
+        /* keep raw body as message */
+      }
+    }
+    throw new Error(message);
   }
   if (!text) return undefined as T;
   try {
@@ -101,7 +125,8 @@ export async function fetchUserById(id: number): Promise<UserResponse | null> {
 export async function fetchCurrentUser(): Promise<UserResponse | null> {
   try {
     return await api<UserResponse>("/users/me", { method: "GET" });
-  } catch {
+  } catch (e) {
+    console.warn("fetchCurrentUser failed:", e);
     return null;
   }
 }

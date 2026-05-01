@@ -23,17 +23,16 @@ public class DashboardController {
     @GetMapping
     public Map<String, Object> getStats(HttpServletRequest request) {
         String email = (String) request.getAttribute("email");
-        String role = (String) request.getAttribute("role");
+        User user = userService.getByEmail(email);
         Map<String, Object> data = new HashMap<>();
 
-        if (Role.ADMIN.name().equals(role)) {
+        if (Role.ADMIN.equals(user.getRole())) {
             data.put("completed", taskService.countByStatus("DONE"));
-            data.put("pending", taskService.countByStatus("TODO"));
+            data.put("pending", taskService.countOpenTasks());
             data.put("overdue", taskService.getOverdueTasks().size());
         } else {
-            User user = userService.getByEmail(email);
             data.put("completed", taskService.countByStatusForUser(user, "DONE"));
-            data.put("pending", taskService.countByStatusForUser(user, "TODO"));
+            data.put("pending", taskService.countOpenTasksForUser(user));
             data.put("overdue", taskService.countOverdueForUser(user));
         }
         return data;

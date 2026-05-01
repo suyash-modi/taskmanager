@@ -114,6 +114,23 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.notice {
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+}
+
+.notice-success {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.notice-error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
 .badge {
   display: inline-block;
   padding: 0.15rem 0.45rem;

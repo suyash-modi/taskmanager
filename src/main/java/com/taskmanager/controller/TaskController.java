@@ -4,6 +4,7 @@ import com.taskmanager.dto.TaskAssignRequest;
 import com.taskmanager.dto.TaskCreateRequest;
 import com.taskmanager.dto.TaskResponse;
 import com.taskmanager.dto.TaskUpdateStatusRequest;
+import com.taskmanager.entity.Role;
 import com.taskmanager.entity.User;
 import com.taskmanager.exception.ForbiddenException;
 import com.taskmanager.service.TaskService;
@@ -33,8 +34,9 @@ public class TaskController {
             @Valid @RequestBody TaskCreateRequest request,
             HttpServletRequest httpRequest) {
 
-        String role = (String) httpRequest.getAttribute("role");
-        if (!"ADMIN".equals(role)) {
+        String email = (String) httpRequest.getAttribute("email");
+        User user = userService.getByEmail(email);
+        if (!Role.ADMIN.equals(user.getRole())) {
             throw new ForbiddenException("Only ADMIN can create tasks");
         }
         return taskService.create(request);
@@ -45,9 +47,8 @@ public class TaskController {
             @PathVariable Long projectId,
             HttpServletRequest httpRequest) {
         String email = (String) httpRequest.getAttribute("email");
-        String role = (String) httpRequest.getAttribute("role");
         User user = userService.getByEmail(email);
-        return taskService.listByProject(projectId, user, role);
+        return taskService.listByProject(projectId, user);
     }
 
     @PutMapping("/{id}/status")
@@ -56,9 +57,8 @@ public class TaskController {
             @Valid @RequestBody TaskUpdateStatusRequest request,
             HttpServletRequest httpRequest) {
         String email = (String) httpRequest.getAttribute("email");
-        String role = (String) httpRequest.getAttribute("role");
         User user = userService.getByEmail(email);
-        return taskService.updateStatus(id, request, user, role);
+        return taskService.updateStatus(id, request, user);
     }
 
     @PutMapping("/{id}/assign")
@@ -66,8 +66,9 @@ public class TaskController {
             @PathVariable Long id,
             @Valid @RequestBody TaskAssignRequest request,
             HttpServletRequest httpRequest) {
-        String role = (String) httpRequest.getAttribute("role");
-        if (!"ADMIN".equals(role)) {
+        String email = (String) httpRequest.getAttribute("email");
+        User user = userService.getByEmail(email);
+        if (!Role.ADMIN.equals(user.getRole())) {
             throw new ForbiddenException("Only ADMIN can assign tasks");
         }
         return taskService.assign(id, request);

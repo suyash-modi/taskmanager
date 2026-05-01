@@ -46,8 +46,8 @@ public class ProjectService {
         return ProjectResponse.fromEntity(saved);
     }
 
-    public List<ProjectResponse> listFor(User currentUser, String roleName) {
-        if (Role.ADMIN.name().equals(roleName)) {
+    public List<ProjectResponse> listFor(User currentUser) {
+        if (Role.ADMIN.equals(currentUser.getRole())) {
             return projectRepository.findAll().stream().map(ProjectResponse::fromEntity).toList();
         }
         return projectRepository.findAccessibleByUserId(currentUser.getId()).stream()
@@ -55,10 +55,10 @@ public class ProjectService {
                 .toList();
     }
 
-    public ProjectResponse getById(Long id, User currentUser, String roleName) {
+    public ProjectResponse getById(Long id, User currentUser) {
         Project p = projectRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + id));
-        if (Role.ADMIN.name().equals(roleName)) {
+        if (Role.ADMIN.equals(currentUser.getRole())) {
             return ProjectResponse.fromEntity(p);
         }
         if (!canAccessProject(p, currentUser)) {

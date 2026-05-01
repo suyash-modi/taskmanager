@@ -22,7 +22,12 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     long countByStatus(String status);
 
+    /** All tasks not in the given status (e.g. not DONE = still open). */
+    long countByStatusNot(String status);
+
     long countByAssignedToAndStatus(User user, String status);
+
+    long countByAssignedToAndStatusNot(User user, String status);
 
     long countByAssignedToAndDeadlineBeforeAndStatusNot(User user, LocalDate date, String status);
 }

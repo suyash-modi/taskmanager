@@ -48,10 +48,10 @@ public class TaskService {
         return TaskResponse.fromEntity(saved);
     }
 
-    public List<TaskResponse> listByProject(Long projectId, User currentUser, String roleName) {
+    public List<TaskResponse> listByProject(Long projectId, User currentUser) {
         Project project = projectService.getEntityById(projectId);
-        ensureProjectAccess(project, currentUser, roleName);
-        List<Task> tasks = Role.ADMIN.name().equals(roleName)
+        ensureProjectAccess(project, currentUser);
+        List<Task> tasks = Role.ADMIN.equals(currentUser.getRole())
                 ? taskRepository.findByProject_Id(projectId)
                 : taskRepository.findByProject_IdAndAssignedTo_Id(projectId, currentUser.getId());
         return tasks.stream()
@@ -81,16 +81,25 @@ public class TaskService {
         return taskRepository.countByAssignedToAndStatus(user, status);
     }
 
+    /** Tasks still open (not DONE), for dashboard "pending". */
+    public long countOpenTasks() {
+        return taskRepository.countByStatusNot("DONE");
+    }
+
+    public long countOpenTasksForUser(User user) {
+        return taskRepository.countByAssignedToAndStatusNot(user, "DONE");
+    }
+
     public long countOverdueForUser(User user) {
         return taskRepository.countByAssignedToAndDeadlineBeforeAndStatusNot(
                 user, LocalDate.now(), "DONE");
     }
 
     @Transactional
-    public TaskResponse updateStatus(Long taskId, TaskUpdateStatusRequest request, User currentUser, String roleName) {
+    public TaskResponse updateStatus(Long taskId, TaskUpdateStatusRequest request, User currentUser) {
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
-        if (Role.ADMIN.name().equals(roleName)) {
+        if (Role.ADMIN.equals(currentUser.getRole())) {
             task.setStatus(request.getStatus());
             return TaskResponse.fromEntity(taskRepository.save(task));
         }
@@ -111,8 +120,8 @@ public class TaskService {
         return TaskResponse.fromEntity(taskRepository.save(task));
     }
 
-    private void ensureProjectAccess(Project project, User currentUser, String roleName) {
-        if (Role.ADMIN.name().equals(roleName)) {
+    private void ensureProjectAccess(Project project, User currentUser) {
+        if (Role.ADMIN.equals(currentUser.getRole())) {
             return;
         }
         if (project.getMembers() != null
