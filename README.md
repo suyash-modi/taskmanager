@@ -225,13 +225,6 @@ Required vars:
 
 ---
 
-## Demo
-
-A concise demo script is available in:
-- `DEMO_VIDEO_SCRIPT.md`
-
----
-
 ## Security Notes
 
 - No plain passwords are returned in API responses.
