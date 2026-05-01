@@ -5,6 +5,8 @@ import com.taskmanager.entity.User;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface TaskRepository extends JpaRepository<Task, Long> {
 
@@ -30,4 +32,15 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     long countByAssignedToAndStatusNot(User user, String status);
 
     long countByAssignedToAndDeadlineBeforeAndStatusNot(User user, LocalDate date, String status);
+
+    long countByProject_CreatedBy_IdAndStatus(Long createdById, String status);
+
+    long countByProject_CreatedBy_IdAndStatusNot(Long createdById, String status);
+
+    @Query("select count(t) from Task t where t.project.createdBy.id = :creatorId "
+            + "and t.deadline < :date and t.status <> :done")
+    long countOverdueForProjectsCreatedBy(
+            @Param("creatorId") Long creatorId,
+            @Param("date") LocalDate date,
+            @Param("done") String done);
 }

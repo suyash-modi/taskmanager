@@ -27,8 +27,9 @@ public class TaskService {
     private final UserRepository userRepository;
 
     @Transactional
-    public TaskResponse create(TaskCreateRequest request) {
+    public TaskResponse create(TaskCreateRequest request, User admin) {
         Project project = projectService.getEntityById(request.getProjectId());
+        ensureProjectOwnedByAdmin(project, admin);
         Task task = new Task();
         task.setTitle(request.getTitle());
         task.setDescription(request.getDescription());
@@ -51,9 +52,10 @@ public class TaskService {
     public List<TaskResponse> listByProject(Long projectId, User currentUser) {
         Project project = projectService.getEntityById(projectId);
         ensureProjectAccess(project, currentUser);
-        List<Task> tasks = Role.ADMIN.equals(currentUser.getRole())
-                ? taskRepository.findByProject_Id(projectId)
-                : taskRepository.findByProject_IdAndAssignedTo_Id(projectId, currentUser.getId());
+        List<Task> tasks =
+                Role.ADMIN.equals(currentUser.getRole())
+                        ? taskRepository.findByProject_Id(projectId)
+                        : taskRepository.findByProject_IdAndAssignedTo_Id(projectId, currentUser.getId());
         return tasks.stream()
                 .map(TaskResponse::fromEntity)
                 .toList();
@@ -86,6 +88,18 @@ public class TaskService {
         return taskRepository.countByStatusNot("DONE");
     }
 
+    public long countCompletedForProjectsCreatedBy(Long creatorId) {
+        return taskRepository.countByProject_CreatedBy_IdAndStatus(creatorId, "DONE");
+    }
+
+    public long countOpenTasksForProjectCreator(Long creatorId) {
+        return taskRepository.countByProject_CreatedBy_IdAndStatusNot(creatorId, "DONE");
+    }
+
+    public long countOverdueForProjectCreator(Long creatorId) {
+        return taskRepository.countOverdueForProjectsCreatedBy(creatorId, LocalDate.now(), "DONE");
+    }
+
     public long countOpenTasksForUser(User user) {
         return taskRepository.countByAssignedToAndStatusNot(user, "DONE");
     }
@@ -100,6 +114,10 @@ public class TaskService {
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
         if (Role.ADMIN.equals(currentUser.getRole())) {
+            Project p = task.getProject();
+            if (p == null || !isProjectCreator(p, currentUser)) {
+                throw new ForbiddenException("You can only update tasks in projects you created");
+            }
             task.setStatus(request.getStatus());
             return TaskResponse.fromEntity(taskRepository.save(task));
         }
@@ -111,9 +129,13 @@ public class TaskService {
     }
 
     @Transactional
-    public TaskResponse assign(Long taskId, TaskAssignRequest request) {
+    public TaskResponse assign(Long taskId, TaskAssignRequest request, User admin) {
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
+        Project p = task.getProject();
+        if (p == null || !isProjectCreator(p, admin)) {
+            throw new ForbiddenException("You can only assign tasks in projects you created");
+        }
         User assignee = userRepository.findById(request.getAssignedToUserId())
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + request.getAssignedToUserId()));
         task.setAssignedTo(assignee);
@@ -122,7 +144,10 @@ public class TaskService {
 
     private void ensureProjectAccess(Project project, User currentUser) {
         if (Role.ADMIN.equals(currentUser.getRole())) {
-            return;
+            if (isProjectCreator(project, currentUser)) {
+                return;
+            }
+            throw new ForbiddenException("You do not have access to this project");
         }
         if (project.getMembers() != null
                 && project.getMembers().stream().anyMatch(m -> m.getId().equals(currentUser.getId()))) {
@@ -133,5 +158,15 @@ public class TaskService {
             return;
         }
         throw new ForbiddenException("You do not have access to this project");
+    }
+
+    private boolean isProjectCreator(Project project, User user) {
+        return project.getCreatedBy() != null && project.getCreatedBy().getId().equals(user.getId());
+    }
+
+    private void ensureProjectOwnedByAdmin(Project project, User admin) {
+        if (!Role.ADMIN.equals(admin.getRole()) || !isProjectCreator(project, admin)) {
+            throw new ForbiddenException("You can only create tasks in projects you created");
+        }
     }
 }

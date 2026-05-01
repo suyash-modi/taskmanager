@@ -48,7 +48,9 @@ public class ProjectService {
 
     public List<ProjectResponse> listFor(User currentUser) {
         if (Role.ADMIN.equals(currentUser.getRole())) {
-            return projectRepository.findAll().stream().map(ProjectResponse::fromEntity).toList();
+            return projectRepository.findByCreatedBy_Id(currentUser.getId()).stream()
+                    .map(ProjectResponse::fromEntity)
+                    .toList();
         }
         return projectRepository.findAccessibleByUserId(currentUser.getId()).stream()
                 .map(ProjectResponse::fromEntity)
@@ -59,6 +61,9 @@ public class ProjectService {
         Project p = projectRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + id));
         if (Role.ADMIN.equals(currentUser.getRole())) {
+            if (p.getCreatedBy() == null || !p.getCreatedBy().getId().equals(currentUser.getId())) {
+                throw new ForbiddenException("You can only view projects you created");
+            }
             return ProjectResponse.fromEntity(p);
         }
         if (!canAccessProject(p, currentUser)) {

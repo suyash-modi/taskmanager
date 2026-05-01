@@ -27,9 +27,10 @@ public class DashboardController {
         Map<String, Object> data = new HashMap<>();
 
         if (Role.ADMIN.equals(user.getRole())) {
-            data.put("completed", taskService.countByStatus("DONE"));
-            data.put("pending", taskService.countOpenTasks());
-            data.put("overdue", taskService.getOverdueTasks().size());
+            Long creatorId = user.getId();
+            data.put("completed", taskService.countCompletedForProjectsCreatedBy(creatorId));
+            data.put("pending", taskService.countOpenTasksForProjectCreator(creatorId));
+            data.put("overdue", taskService.countOverdueForProjectCreator(creatorId));
         } else {
             data.put("completed", taskService.countByStatusForUser(user, "DONE"));
             data.put("pending", taskService.countOpenTasksForUser(user));

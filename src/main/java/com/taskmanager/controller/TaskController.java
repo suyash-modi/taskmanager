@@ -39,7 +39,7 @@ public class TaskController {
         if (!Role.ADMIN.equals(user.getRole())) {
             throw new ForbiddenException("Only ADMIN can create tasks");
         }
-        return taskService.create(request);
+        return taskService.create(request, user);
     }
 
     @GetMapping("/project/{projectId}")
@@ -71,7 +71,7 @@ public class TaskController {
         if (!Role.ADMIN.equals(user.getRole())) {
             throw new ForbiddenException("Only ADMIN can assign tasks");
         }
-        return taskService.assign(id, request);
+        return taskService.assign(id, request, user);
     }
 
     @GetMapping("/my")
