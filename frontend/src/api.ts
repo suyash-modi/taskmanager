@@ -75,12 +75,25 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(text || res.statusText);
+    try {
+      const parsed = text ? (JSON.parse(text) as { message?: string }) : {};
+      throw new Error(parsed.message || text || res.statusText);
+    } catch {
+      throw new Error(text || res.statusText);
+    }
   }
   if (!text) return undefined as T;
   try {
     return JSON.parse(text) as T;
   } catch {
     return text as T;
+  }
+}
+
+export async function fetchUserById(id: number): Promise<UserResponse | null> {
+  try {
+    return await api<UserResponse>(`/users/${id}`, { method: "GET" });
+  } catch {
+    return null;
   }
 }

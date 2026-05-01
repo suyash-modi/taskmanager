@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   clearAuth,
+  fetchUserById,
   getAuth,
   setAuth,
   type DashboardStats,
@@ -19,10 +20,13 @@ type SignupForm = {
   role: Role;
 };
 
+type LookupMap = Record<number, UserResponse | null>;
+
 export default function App() {
   const [auth, setAuthState] = useState<LoginResponse | null>(() => getAuth());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
 
   const [signup, setSignup] = useState<SignupForm>({
     name: "",
@@ -48,8 +52,20 @@ export default function App() {
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
   const [myTasks, setMyTasks] = useState<TaskResponse[]>([]);
   const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
+  const [userLookup, setUserLookup] = useState<LookupMap>({});
 
   const isAdmin = useMemo(() => auth?.role === "ADMIN", [auth]);
+  const fallbackProjectIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          myTasks
+            .map((t) => t.projectId)
+            .filter((id): id is number => typeof id === "number"),
+        ),
+      ),
+    [myTasks],
+  );
 
   const refreshProjects = useCallback(async () => {
     if (!getAuth()) return;
@@ -96,11 +112,14 @@ export default function App() {
     void (async () => {
       try {
         setError(null);
+        setLoadingMessage("Loading workspace...");
         await refreshProjects();
         await refreshDashboard();
         await refreshMyTasks();
+        setLoadingMessage(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        setLoadingMessage(null);
       }
     })();
   }, [auth, refreshProjects, refreshDashboard, refreshMyTasks]);
@@ -120,6 +139,56 @@ export default function App() {
     }
   }, [selectedProjectId, refreshTasksForProject]);
 
+  useEffect(() => {
+    if (selectedProjectId !== "") return;
+    if (projects.length > 0) {
+      setSelectedProjectId(projects[0]?.id ?? "");
+      return;
+    }
+    if (fallbackProjectIds.length > 0) {
+      setSelectedProjectId(fallbackProjectIds[0]);
+    }
+  }, [selectedProjectId, projects, fallbackProjectIds]);
+
+  const parsedMemberIds = useMemo(
+    () =>
+      memberIds
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n)),
+    [memberIds],
+  );
+
+  const parsedAssigneeId = useMemo(() => {
+    const val = Number(assigneeId.trim());
+    return Number.isFinite(val) ? val : null;
+  }, [assigneeId]);
+
+  const knownUserIds = useMemo(() => {
+    const ids = new Set<number>();
+    parsedMemberIds.forEach((id) => ids.add(id));
+    if (parsedAssigneeId) ids.add(parsedAssigneeId);
+    return Array.from(ids);
+  }, [parsedMemberIds, parsedAssigneeId]);
+
+  useEffect(() => {
+    if (!auth || knownUserIds.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const id of knownUserIds) {
+        if (userLookup[id] !== undefined) continue;
+        const user = await fetchUserById(id);
+        if (cancelled) return;
+        setUserLookup((prev) => ({ ...prev, [id]: user }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, knownUserIds, userLookup]);
+
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -130,6 +199,7 @@ export default function App() {
         body: JSON.stringify(signup),
       });
       setSignup({ name: "", email: "", password: "", role: "MEMBER" });
+      setError("Account created successfully. You can login now.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -162,6 +232,7 @@ export default function App() {
       };
       setAuth(normalized);
       setAuthState(normalized);
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -176,6 +247,7 @@ export default function App() {
     setTasks([]);
     setMyTasks([]);
     setDashboard(null);
+    setLoadingMessage(null);
   }
 
   async function handleCreateProject(e: React.FormEvent) {
@@ -263,17 +335,51 @@ export default function App() {
     }
   }
 
+  function statusClass(status: string): string {
+    const normalized = status?.toUpperCase?.() ?? "";
+    if (normalized === "DONE") return "status status-done";
+    if (normalized === "IN_PROGRESS") return "status status-inprogress";
+    if (normalized === "TODO") return "status status-todo";
+    return "status";
+  }
+
+  function renderUserHint(id: number) {
+    const entry = userLookup[id];
+    if (entry === undefined) return <span className="id-chip pending">#{id} checking...</span>;
+    if (!entry) return <span className="id-chip bad">#{id} not found</span>;
+    return (
+      <span className="id-chip ok">
+        #{id} {entry.name}
+      </span>
+    );
+  }
+
   return (
     <div className="app">
-      <h1>Team Task Manager</h1>
-      <p>
-        API: <code>{import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"}</code>
-      </p>
+      <header className="topbar card">
+        <div>
+          <h1>Team Task Manager</h1>
+          <p className="muted">
+            API: <code>{import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"}</code>
+          </p>
+        </div>
+        {auth && (
+          <div className="row">
+            <div className="user-pill">
+              {auth.email} <span className="badge">{auth.role}</span>
+            </div>
+            <button type="button" className="secondary" onClick={handleLogout}>
+              Log out
+            </button>
+          </div>
+        )}
+      </header>
 
       {error && <div className="card error">{error}</div>}
+      {loadingMessage && <div className="card muted">{loadingMessage}</div>}
 
       {!auth ? (
-        <div className="row" style={{ alignItems: "stretch" }}>
+        <div className="auth-grid">
           <form className="card" onSubmit={handleSignup} style={{ flex: 1 }}>
             <h2>Sign up</h2>
             <div className="row">
@@ -349,16 +455,6 @@ export default function App() {
         </div>
       ) : (
         <>
-          <div className="card row">
-            <div>
-              Signed in as <strong>{auth.email}</strong>{" "}
-              <span className="badge">{auth.role}</span>
-            </div>
-            <button type="button" className="secondary" onClick={handleLogout}>
-              Log out
-            </button>
-          </div>
-
           {dashboard && (
             <div className="card">
               <h2>Dashboard</h2>
@@ -397,6 +493,9 @@ export default function App() {
                   />
                 </label>
               </div>
+              {parsedMemberIds.length > 0 && (
+                <div className="row chips">{parsedMemberIds.map((id) => <span key={id}>{renderUserHint(id)}</span>)}</div>
+              )}
               <button type="submit" disabled={busy}>
                 Create project
               </button>
@@ -405,8 +504,8 @@ export default function App() {
 
           <div className="card">
             <h2>Projects</h2>
-            {projects.length === 0 ? (
-              <p>No projects yet.</p>
+            {projects.length === 0 && fallbackProjectIds.length === 0 ? (
+              <p>No projects visible. Ask ADMIN to add you as a project member.</p>
             ) : (
               <ul>
                 {projects.map((p) => (
@@ -422,6 +521,20 @@ export default function App() {
                     <strong>{p.name}</strong> — {p.description || "—"}
                   </li>
                 ))}
+                {projects.length === 0 &&
+                  fallbackProjectIds.map((pid) => (
+                    <li key={pid}>
+                      <button
+                        type="button"
+                        className="secondary"
+                        style={{ marginRight: "0.5rem" }}
+                        onClick={() => setSelectedProjectId(pid)}
+                      >
+                        {selectedProjectId === pid ? "Selected" : "Select"}
+                      </button>
+                      <strong>Project #{pid}</strong> — from your assigned tasks
+                    </li>
+                  ))}
               </ul>
             )}
           </div>
@@ -451,6 +564,7 @@ export default function App() {
                   <input value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} placeholder="optional" />
                 </label>
               </div>
+              {parsedAssigneeId && <div className="row chips">{renderUserHint(parsedAssigneeId)}</div>}
               <label>
                 Description
                 <textarea rows={2} value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} />
@@ -470,7 +584,9 @@ export default function App() {
                 <ul className="tasks">
                   {tasks.map((t) => (
                     <li key={t.id}>
-                      <strong>{t.title}</strong> ({t.status}) — assignee: {t.assignedToUserId ?? "—"}
+                      <strong>{t.title}</strong>{" "}
+                      <span className={statusClass(t.status)}>{t.status}</span> — assignee:{" "}
+                      {t.assignedToUserId ? renderUserHint(t.assignedToUserId) : "—"}
                       <div className="row" style={{ marginTop: "0.35rem" }}>
                         <button
                           type="button"
@@ -512,7 +628,34 @@ export default function App() {
               <ul className="tasks">
                 {myTasks.map((t) => (
                   <li key={t.id}>
-                    <strong>{t.title}</strong> — {t.status} (project #{t.projectId})
+                    <strong>{t.title}</strong>{" "}
+                    <span className={statusClass(t.status)}>{t.status}</span> (project #{t.projectId})
+                    <div className="row" style={{ marginTop: "0.35rem" }}>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => void updateTaskStatus(t.id, "TODO")}
+                      >
+                        TODO
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => void updateTaskStatus(t.id, "IN_PROGRESS")}
+                      >
+                        In progress
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => void updateTaskStatus(t.id, "DONE")}
+                      >
+                        Done
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

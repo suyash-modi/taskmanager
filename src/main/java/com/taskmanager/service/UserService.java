@@ -62,4 +62,8 @@ public class UserService {
         return userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + id));
     }
+
+    public UserResponse getByIdResponse(Long id) {
+        return UserResponse.fromEntity(getById(id));
+    }
 }
