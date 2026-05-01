@@ -53,30 +53,40 @@ export default function App() {
 
   const refreshProjects = useCallback(async () => {
     if (!getAuth()) return;
-    const list = await api<ProjectResponse[]>("/projects", { method: "GET" });
+    const raw = await api<unknown>("/projects", { method: "GET" });
+    const list = Array.isArray(raw) ? (raw as ProjectResponse[]) : [];
     setProjects(list);
     if (list.length && selectedProjectId === "") {
-      setSelectedProjectId(list[0].id);
+      setSelectedProjectId(list[0]?.id ?? "");
     }
   }, [selectedProjectId]);
 
   const refreshDashboard = useCallback(async () => {
     if (!getAuth()) return;
-    const d = await api<DashboardStats>("/dashboard", { method: "GET" });
-    setDashboard(d);
+    const raw = await api<unknown>("/dashboard", { method: "GET" });
+    if (raw && typeof raw === "object") {
+      const obj = raw as Record<string, unknown>;
+      setDashboard({
+        completed: Number(obj.completed ?? 0),
+        pending: Number(obj.pending ?? 0),
+        overdue: Number(obj.overdue ?? 0),
+      });
+    } else {
+      setDashboard({ completed: 0, pending: 0, overdue: 0 });
+    }
   }, []);
 
   const refreshMyTasks = useCallback(async () => {
     if (!getAuth()) return;
-    const t = await api<TaskResponse[]>("/tasks/my", { method: "GET" });
-    setMyTasks(t);
+    const raw = await api<unknown>("/tasks/my", { method: "GET" });
+    setMyTasks(Array.isArray(raw) ? (raw as TaskResponse[]) : []);
   }, []);
 
   const refreshTasksForProject = useCallback(
     async (projectId: number) => {
       if (!getAuth()) return;
-      const t = await api<TaskResponse[]>(`/tasks/project/${projectId}`, { method: "GET" });
-      setTasks(t);
+      const raw = await api<unknown>(`/tasks/project/${projectId}`, { method: "GET" });
+      setTasks(Array.isArray(raw) ? (raw as TaskResponse[]) : []);
     },
     [],
   );
@@ -132,12 +142,26 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const res = await api<LoginResponse>("/auth/login", {
+      const raw = await api<unknown>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       });
-      setAuth(res);
-      setAuthState(res);
+      if (!raw || typeof raw !== "object") {
+        throw new Error("Unexpected login response");
+      }
+      const res = raw as Partial<LoginResponse>;
+      if (!res.accessToken || !res.email || !res.role) {
+        throw new Error("Invalid login payload. Re-check backend /auth/login response.");
+      }
+      const normalized: LoginResponse = {
+        accessToken: res.accessToken,
+        tokenType: res.tokenType ?? "Bearer",
+        expiresInSeconds: Number(res.expiresInSeconds ?? 3600),
+        email: res.email,
+        role: res.role as Role,
+      };
+      setAuth(normalized);
+      setAuthState(normalized);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
