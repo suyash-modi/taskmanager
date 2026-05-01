@@ -73,9 +73,6 @@ public class ProjectService {
     }
 
     private boolean canAccessProject(Project p, User user) {
-        if (p.getCreatedBy() != null && p.getCreatedBy().getId().equals(user.getId())) {
-            return true;
-        }
         if (p.getMembers() == null) {
             return false;
         }

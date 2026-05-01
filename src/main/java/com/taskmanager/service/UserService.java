@@ -58,6 +58,10 @@ public class UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
     }
 
+    public UserResponse getByEmailResponse(String email) {
+        return UserResponse.fromEntity(getByEmail(email));
+    }
+
     public User getById(Long id) {
         return userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + id));

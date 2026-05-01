@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   clearAuth,
+  fetchCurrentUser,
   fetchUserById,
   getAuth,
   setAuth,
@@ -53,6 +54,7 @@ export default function App() {
   const [myTasks, setMyTasks] = useState<TaskResponse[]>([]);
   const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
   const [userLookup, setUserLookup] = useState<LookupMap>({});
+  const [currentUser, setCurrentUser] = useState<UserResponse | null>(null);
 
   const isAdmin = useMemo(() => auth?.role === "ADMIN", [auth]);
   const fallbackProjectIds = useMemo(
@@ -113,6 +115,8 @@ export default function App() {
       try {
         setError(null);
         setLoadingMessage("Loading workspace...");
+        const me = await fetchCurrentUser();
+        setCurrentUser(me);
         await refreshProjects();
         await refreshDashboard();
         await refreshMyTasks();
@@ -243,6 +247,7 @@ export default function App() {
   function handleLogout() {
     clearAuth();
     setAuthState(null);
+    setCurrentUser(null);
     setProjects([]);
     setTasks([]);
     setMyTasks([]);
@@ -261,7 +266,8 @@ export default function App() {
         .map((s) => s.trim())
         .filter(Boolean)
         .map((s) => Number(s))
-        .filter((n) => !Number.isNaN(n));
+        .filter((n) => !Number.isNaN(n))
+        .filter((n) => (currentUser ? n !== currentUser.id : true));
       await api<ProjectResponse>("/projects", {
         method: "POST",
         body: JSON.stringify({
@@ -366,7 +372,8 @@ export default function App() {
         {auth && (
           <div className="row">
             <div className="user-pill">
-              {auth.email} <span className="badge">{auth.role}</span>
+              {currentUser ? `#${currentUser.id} ${currentUser.name}` : auth.email}{" "}
+              <span className="badge">{auth.role}</span>
             </div>
             <button type="button" className="secondary" onClick={handleLogout}>
               Log out
@@ -489,10 +496,15 @@ export default function App() {
                   <input
                     value={memberIds}
                     onChange={(e) => setMemberIds(e.target.value)}
-                    placeholder="2,3"
+                    placeholder="2,3 (creator auto-added)"
                   />
                 </label>
               </div>
+              {currentUser && (
+                <p className="muted">
+                  Creator auto-added to project members: #{currentUser.id} {currentUser.name}
+                </p>
+              )}
               {parsedMemberIds.length > 0 && (
                 <div className="row chips">{parsedMemberIds.map((id) => <span key={id}>{renderUserHint(id)}</span>)}</div>
               )}

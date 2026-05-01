@@ -97,3 +97,11 @@ export async function fetchUserById(id: number): Promise<UserResponse | null> {
     return null;
   }
 }
+
+export async function fetchCurrentUser(): Promise<UserResponse | null> {
+  try {
+    return await api<UserResponse>("/users/me", { method: "GET" });
+  } catch {
+    return null;
+  }
+}

@@ -2,6 +2,7 @@ package com.taskmanager.controller;
 
 import com.taskmanager.dto.UserResponse;
 import com.taskmanager.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +19,12 @@ public class UserQueryController {
     @GetMapping("/{id}")
     public UserResponse getById(@PathVariable Long id) {
         return userService.getByIdResponse(id);
+    }
+
+    @GetMapping("/me")
+    public UserResponse getCurrentUser(HttpServletRequest request) {
+        String email = (String) request.getAttribute("email");
+        return userService.getByEmailResponse(email);
     }
 }
 

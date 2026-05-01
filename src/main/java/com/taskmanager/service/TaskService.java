@@ -51,7 +51,10 @@ public class TaskService {
     public List<TaskResponse> listByProject(Long projectId, User currentUser, String roleName) {
         Project project = projectService.getEntityById(projectId);
         ensureProjectAccess(project, currentUser, roleName);
-        return taskRepository.findByProject_Id(projectId).stream()
+        List<Task> tasks = Role.ADMIN.name().equals(roleName)
+                ? taskRepository.findByProject_Id(projectId)
+                : taskRepository.findByProject_IdAndAssignedTo_Id(projectId, currentUser.getId());
+        return tasks.stream()
                 .map(TaskResponse::fromEntity)
                 .toList();
     }
@@ -110,9 +113,6 @@ public class TaskService {
 
     private void ensureProjectAccess(Project project, User currentUser, String roleName) {
         if (Role.ADMIN.name().equals(roleName)) {
-            return;
-        }
-        if (project.getCreatedBy() != null && project.getCreatedBy().getId().equals(currentUser.getId())) {
             return;
         }
         if (project.getMembers() != null

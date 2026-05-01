@@ -13,6 +13,6 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     Optional<Project> findByIdWithAssociations(@Param("id") Long id);
 
     @Query("select distinct p from Project p left join fetch p.members m left join fetch p.createdBy "
-            + "where p.createdBy.id = :userId or m.id = :userId")
+            + "where m.id = :userId")
     List<Project> findAccessibleByUserId(@Param("userId") Long userId);
 }
